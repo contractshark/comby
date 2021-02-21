@@ -336,7 +336,28 @@ module Make (Syntax : Syntax.S) (Info : Info.S) = struct
           | Ok (Hole { sort; identifier; dimension; _ }, user_state) ->
             begin
               match sort with
-              | Regex -> failwith "Not supported (seq chain)"
+              | Regex ->
+                let identifier, pattern = String.lsplit2_exn identifier ~on:'~' in
+                let identifier = if String.(identifier = "") then "_" else identifier in
+                if debug then Format.printf "Regex: Id: %s Pat: %s@." identifier pattern;
+                let compiled_regexp = Omega_regexp.PCRE.make_regexp pattern in
+                let regexp_parser = Omega_regexp.PCRE.regexp compiled_regexp in
+                let _base_parser = [ regexp_parser ] in
+                pos >>= fun offset ->
+                Format.printf "OFFSET: %d@." offset;
+                choice _base_parser
+                (*choice [ any_char ] >>| Char.to_string*)
+                >>= fun value ->
+                Format.printf "VALUE: %s@." value;
+                acc >>= fun _ ->
+                let m =
+                  { offset
+                  ; identifier
+                  ; text = value
+                  }
+                in
+                Format.printf "SAVE MATCH@.";
+                r user_state (Match m)
               | Alphanum ->
                 pos >>= fun offset ->
                 many1 (generate_single_hole_parser ())
@@ -603,6 +624,26 @@ module Make (Syntax : Syntax.S) (Info : Info.S) = struct
     *> identifier_parser ()
     <* string "]"
 
+  let regex_body () =
+    let expr =
+      fix (fun expr ->
+          choice
+            [ ((char '[' *> (many1 expr) <* char ']') |>> fun char_class -> Format.sprintf "[%s]" @@ String.concat char_class)
+            ; (char '\\' *> any_char |>> fun c -> (Format.sprintf "\\%c" c))
+            ; (not_char ']' |>> Char.to_string)
+            ])
+    in
+    let regex_identifier () =
+      identifier_parser () >>= fun v -> char '~' *> many1 expr >>= fun e -> return (Format.sprintf "%s~%s" v (String.concat e))
+    in
+    regex_identifier () >>= fun identifier ->
+    if debug then Format.printf "Regex accepts %s@." identifier;
+    return identifier
+
+
+  let regex_hole_parser () =
+    string ":[" *> regex_body () <* string "]"
+
   let hole_parser sort dimension : (production * 'a) t t =
     let open Hole in
     let hole_parser =
@@ -613,7 +654,7 @@ module Make (Syntax : Syntax.S) (Info : Info.S) = struct
       | Line -> line_hole_parser ()
       | Non_space -> non_space_hole_parser ()
       | Expression -> expression_hole_parser ()
-      | Regex -> single_hole_parser ()
+      | Regex -> regex_hole_parser ()
     in
     let skip_signal hole = skip_unit (string "_signal_hole") |>> fun () -> (Hole hole, acc) in
     hole_parser |>> fun identifier -> skip_signal { sort; identifier; dimension; optional = false; at_depth = None }
