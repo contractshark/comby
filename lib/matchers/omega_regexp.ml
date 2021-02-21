@@ -1,3 +1,5 @@
+open Angstrom
+
 module type Regexp_engine_intf = sig
   type t
   type substrings
@@ -16,10 +18,38 @@ type t =
   ; buffer : bytes
   }
 
-module Make (R: Regexp_engine_intf) = struct
+(* I think I should just implement the analog of string_ for regex with some bounded buffer size. *)
+
+module Make (Regexp: Regexp_engine_intf) = struct
   (* https://sourcegraph.com/github.com/comby-tools/mparser/-/blob/src/mParser_Char_Stream.ml#L231:8 *)
   let match_regexp s pos rex =
-    R.exec ~rex ~pos:(pos - s.buffer_pos) s.buffer
+    Regexp.exec ~rex ~pos:(pos - s.buffer_pos) s.buffer
+
+  let make_regexp pat =
+    Regexp.make pat
+
+  (* FIXME: size. FIXME advance => want to use internal unsafe_apply_opt
+     actually. cf. string_ in angstrom.ml. actually, do peek, then
+     advance/commit. *)
+  let regexp rex : string Angstrom.t =
+    let match_option =
+      Unsafe.peek 10000 (fun buffer ~off ~len:_ ->
+          Format.printf "Got string %s@." @@ Bigstringaf.to_string buffer;
+          let bytes = Bigstringaf.to_string buffer |> Bytes.of_string in
+          match Regexp.exec ~rex ~pos:off bytes with
+          | None -> None
+          | Some substrings ->
+            match Regexp.get_substring substrings 0 with
+            | None -> None
+            | Some result ->
+              Some (result, String.length result))
+    in
+    match_option >>= function
+    | Some (result, n) ->
+      Unsafe.take n (fun _ ~off:_ ~len:_ -> ()) >>= fun _ ->
+      return result
+    | None -> fail "No match" (* this will not backtrack I think *)
+
 end
 
 module PCRE = struct

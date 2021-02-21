@@ -18,7 +18,12 @@ end
 type t
 
 module Make (Regexp : Regexp_engine_intf): sig
+  (* do not use this, use regexp. *)
   val match_regexp: t -> int -> Regexp.t -> Regexp.substrings option
+
+  val make_regexp : string -> Regexp.t
+
+  val regexp : Regexp.t -> string Angstrom.t
 end
 
 module PCRE : sig
