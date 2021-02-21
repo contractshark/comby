@@ -55,10 +55,13 @@ let substitute template env =
         |> Option.value ~default:(acc,vars)
       | None -> acc, vars)
 
+let signal_empty_match_context = ref false
+
 let record_match_context pos_before pos_after =
   let open Match.Location in
   if debug then Format.printf "match context start pos: %d@." pos_before;
   if debug then Format.printf "match context end pos %d@." pos_after;
+  if debug then if !signal_empty_match_context then Format.printf "!!!!!!! empty match implies pos_after is now 0";
   let extract_matched_text source { offset = match_start; _ } { offset = match_end; _ } =
     String.slice source match_start match_end
   in
@@ -115,6 +118,7 @@ module Make (Syntax : Syntax.S) (Info : Info.S) = struct
       (* line/col values are placeholders and not accurate until processed in pipeline.ml *)
       let before = { offset = pos_begin; line = 1; column = pos_begin + 1 } in
       let pos_after_offset = pos_begin + String.length content in
+      (*Format.printf "After: %d@." pos_after_offset;*)
       let after = { offset = pos_after_offset; line = 1; column = pos_after_offset + 1 } in
       let range = { match_start = before; match_end = after } in
       let add identifier = Environment.add ~range !current_environment_ref identifier content in
@@ -342,13 +346,10 @@ module Make (Syntax : Syntax.S) (Info : Info.S) = struct
                 if debug then Format.printf "Regex: Id: %s Pat: %s@." identifier pattern;
                 let compiled_regexp = Omega_regexp.PCRE.make_regexp pattern in
                 let regexp_parser = Omega_regexp.PCRE.regexp compiled_regexp in
-                let _base_parser = [ regexp_parser ] in
+                let base_parser = [ regexp_parser; end_of_input >>= fun () -> return "" ] in
                 pos >>= fun offset ->
-                Format.printf "OFFSET: %d@." offset;
-                choice _base_parser
-                (*choice [ any_char ] >>| Char.to_string*)
+                choice base_parser
                 >>= fun value ->
-                Format.printf "VALUE: %s@." value;
                 acc >>= fun _ ->
                 let m =
                   { offset
@@ -356,7 +357,6 @@ module Make (Syntax : Syntax.S) (Info : Info.S) = struct
                   ; text = value
                   }
                 in
-                Format.printf "SAVE MATCH@.";
                 r user_state (Match m)
               | Alphanum ->
                 pos >>= fun offset ->
@@ -779,8 +779,13 @@ module Make (Syntax : Syntax.S) (Info : Info.S) = struct
                 pos >>= fun start_pos ->
                 let matched =
                   matcher >>= fun production ->
+                  (* here we need to know the whole match, and the _content_ of what was matched.
+                     What's happening is that we should be advancing 1 here if it was empty match.
+                     right now we advance in the regex if empty match. if we don't do it there, it
+                     will just spin. *)
                   if debug then Format.printf "Full match context result@.";
                   pos >>= fun end_pos ->
+                  let end_pos = if start_pos = end_pos then start_pos else end_pos in
                   record_match_context start_pos end_pos;
                   current_environment_ref := Match.Environment.create ();
                   return production

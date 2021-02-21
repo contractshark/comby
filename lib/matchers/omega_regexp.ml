@@ -28,39 +28,37 @@ module Make (Regexp: Regexp_engine_intf) = struct
   let make_regexp pat =
     Regexp.make pat
 
+  (* TODO: tests and blit thing below *)
+
   (* FIXME: size. about advance => want to use internal unsafe_apply_opt
      actually. cf. string_ in angstrom.ml. instead, trying "do peek, then
      advance/commit." *)
   let regexp rex : string Angstrom.t =
-    Format.printf "REGEXP@.";
-    let match_option () =
-      (* Why do Unsafe if I can just do peek_string? => So I don't allocate on copy of buffer. *)
-      (* But it looks like we can't avoid allocation in converting bigstringaf to bytes *)
-      Unsafe.peek 1 (fun buffer ~off ~len:_ ->
-          Bigstringaf.length buffer - off - 1) >>= fun n ->
-      Format.printf "Got length %d@." n;
-      Unsafe.peek n (fun buffer ~off ~len:_ ->
-          Format.printf "Got string %s@." @@ Bigstringaf.to_string buffer;
-          (* this will do a copy :(. Use blits instead though. *)
-          let bytes = Bigstringaf.to_string buffer |> Bytes.of_string in
-          match Regexp.exec ~rex ~pos:off bytes with
+    (* Why do Unsafe if I can just do peek_string? => So I don't allocate on copy of buffer. *)
+    (* But it looks like we can't avoid allocation in converting bigstringaf to bytes *)
+    Unsafe.peek 1 (fun buffer ~off ~len:_ -> Bigstringaf.length buffer - off) >>= fun n ->
+    Unsafe.peek n (fun buffer ~off ~len ->
+        (* This still does a copy :( *)
+        let bytes = Bytes.create len in
+        Bigstringaf.unsafe_blit_to_bytes buffer ~src_off:off bytes ~dst_off:0 ~len;
+        match Regexp.exec ~rex ~pos:0 bytes with
+        | None -> None
+        | Some substrings ->
+          match Regexp.get_substring substrings 0 with
           | None -> None
-          | Some substrings ->
-            match Regexp.get_substring substrings 0 with
-            | None -> None
-            | Some result ->
-              Some (result, String.length result))
-    in
-    let result =
-      match_option () >>= function
-      | Some (result, n) ->
-        (* Unsafe.take n (fun _ ~off:_ ~len:_ -> ()) >>= fun _ -> *)
-        advance n >>= fun () ->
-        return result
-      | None ->
-        fail "No match" (* this will not backtrack I think *)
-    in
-    result
+          | Some result ->
+            Some (result, String.length result))
+    >>= function
+    | Some (result, _n) ->
+      (* if empty string matches, this hole like for optionals (x?), advance 1. *)
+      (* we want to advance one so parsing can continue, but if we advance 1 here we will think
+         that the match context is at least length 1 and not 0 if this hole is the only thing
+         defining the match context *)
+      (* let n = if n > 0 then n else 1 in
+         advance n >>= fun () -> *)
+      return result
+    | None ->
+      fail "No match"
 end
 
 module PCRE = struct
