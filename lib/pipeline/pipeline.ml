@@ -146,14 +146,18 @@ let run_on_specifications specifications output_printer process (input : single_
           | Nothing | Matches _ -> input
           | Replacement (_, content, _) -> String content
         in
-        process input specification
-        |> function
-        | Nothing -> Nothing, count
-        | Matches (l, number_of_matches) ->
-          Matches (l, number_of_matches), count + number_of_matches
-        | Replacement (l, content, number_of_matches) ->
+        let processed = process input specification in
+        match processed, result with
+        | Matches (l, number_of_matches), Nothing -> Matches (l, number_of_matches), number_of_matches
+        | Replacement (l, content, number_of_matches), Nothing -> Replacement (l, content, number_of_matches), number_of_matches
+        | Nothing, _ -> Nothing, count
+        | Matches (l, number_of_matches), Matches (r, _) ->
+          Matches (l@r, number_of_matches), count + number_of_matches
+        | Replacement (l, content, number_of_matches), _ ->
           Replacement (l, content, number_of_matches),
-          count + number_of_matches)
+          count + number_of_matches
+        | _, result -> result, count
+      )
   in
   output_result output_printer output_file input result;
   count
