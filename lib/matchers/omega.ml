@@ -779,10 +779,14 @@ module Make (Syntax : Syntax.S) (Info : Info.S) = struct
                 pos >>= fun start_pos ->
                 let matched =
                   matcher >>= fun production ->
-                  (* here we need to know the whole match, and the _content_ of what was matched.
-                     What's happening is that we should be advancing 1 here if it was empty match.
-                     right now we advance in the regex if empty match. if we don't do it there, it
-                     will just spin. *)
+                  (* here we need to know the whole match, and the _content_ of
+                     what was matched. What's happening is that we should be
+                     advancing 1 here if it was empty match. previously we
+                     wanted to advance in the regex if empty match, but that's
+                     only for one hole, not the entire match context. but
+                     currently this causes it to just spin. we need to do it
+                     here like in alpha... but how? remove the outer "many"
+                     parser of this matching part? *)
                   if debug then Format.printf "Full match context result@.";
                   pos >>= fun end_pos ->
                   let end_pos = if start_pos = end_pos then start_pos else end_pos in
